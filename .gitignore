@@ -35,7 +35,7 @@ yarn-error.log*
 .env*
 
 # convex
-/convex/_generated/
+# /convex/_generated/ (tracked for production builds on Vercel)
 
 # vercel
 .vercel

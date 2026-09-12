@@ -34,11 +34,17 @@ export const Connector = ({ id, layer, onPointerDown, selectionColor }: Connecto
         endPoint: { x: e.x + e.width / 2 - layer.x, y: e.y + e.height / 2 - layer.y },
       };
     }
+    if (layer.startPoint && layer.endPoint) {
+      return {
+        startPoint: layer.startPoint,
+        endPoint: layer.endPoint,
+      };
+    }
     return {
-      startPoint: { x: 0, y: layer.height / 2 },
-      endPoint: { x: layer.width, y: layer.height / 2 },
+      startPoint: { x: 0, y: 0 },
+      endPoint: { x: Math.max(10, layer.width), y: Math.max(10, layer.height) },
     };
-  }, [boundLayers, layer.height, layer.width, layer.x, layer.y]);
+  }, [boundLayers, layer.height, layer.width, layer.x, layer.y, layer.startPoint, layer.endPoint]);
 
   const pathD = useMemo(() => {
     const { x: x1, y: y1 } = startPoint;
@@ -46,13 +52,45 @@ export const Connector = ({ id, layer, onPointerDown, selectionColor }: Connecto
     const style = layer.style || "straight";
 
     if (style === "elbow") {
-      const midX = (x1 + x2) / 2;
-      return `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+      const dx = Math.abs(x2 - x1);
+      const dy = Math.abs(y2 - y1);
+      if (dy < 5) {
+        const midX = (x1 + x2) / 2;
+        const stepY = Math.max(25, Math.min(50, dx * 0.3));
+        return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y1 + stepY} L ${x2} ${y1 + stepY}`;
+      }
+      if (dx < 5) {
+        const midY = (y1 + y2) / 2;
+        const stepX = Math.max(25, Math.min(50, dy * 0.3));
+        return `M ${x1} ${y1} L ${x1 + stepX} ${midY} L ${x1 + stepX} ${y2} L ${x2} ${y2}`;
+      }
+      if (dx >= dy) {
+        const midX = (x1 + x2) / 2;
+        return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+      } else {
+        const midY = (y1 + y2) / 2;
+        return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
+      }
     }
 
     if (style === "curved") {
-      const dx = (x2 - x1) * 0.5;
-      return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+      const dx = Math.abs(x2 - x1);
+      const dy = Math.abs(y2 - y1);
+      if (dy < 5) {
+        const arcY = Math.max(30, dx * 0.25);
+        return `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${y1 - arcY}, ${x2} ${y2}`;
+      }
+      if (dx < 5) {
+        const arcX = Math.max(30, dy * 0.25);
+        return `M ${x1} ${y1} Q ${x1 + arcX} ${(y1 + y2) / 2}, ${x2} ${y2}`;
+      }
+      if (dx >= dy) {
+        const offset = (x2 - x1) * 0.5;
+        return `M ${x1} ${y1} C ${x1 + offset} ${y1}, ${x2 - offset} ${y2}, ${x2} ${y2}`;
+      } else {
+        const offset = (y2 - y1) * 0.5;
+        return `M ${x1} ${y1} C ${x1} ${y1 + offset}, ${x2} ${y2 - offset}, ${x2} ${y2}`;
+      }
     }
 
     // Default straight
@@ -60,7 +98,10 @@ export const Connector = ({ id, layer, onPointerDown, selectionColor }: Connecto
   }, [endPoint, layer.style, startPoint]);
 
   const strokeColor = selectionColor || colorToCss(layer.fill);
-  const showEndArrow = layer.arrow !== false;
+  const showEndArrow =
+    layer.arrowEnd !== undefined
+      ? Boolean(layer.arrowEnd)
+      : layer.arrow !== false;
   const showStartArrow = Boolean(layer.arrowStart);
 
   return (

@@ -130,3 +130,27 @@ body,
   }
 }
 
+/* =========================================================
+   Liveblocks Free-Tier Watermark / Badge Suppression
+   ========================================================= */
+[class*="liveblocks-badge"],
+[class*="lb-badge"],
+[id*="liveblocks-badge"],
+[id*="lb-badge"],
+[data-liveblocks-badge],
+a[href*="liveblocks.io"],
+div[class*="liveblocks"]:has(a[href*="liveblocks.io"]),
+div[style*="z-index"]:has(a[href*="liveblocks.io"]),
+div:has(> a[href*="liveblocks.io"]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+  z-index: -9999 !important;
+}
+

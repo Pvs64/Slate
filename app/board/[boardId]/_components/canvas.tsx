@@ -268,7 +268,12 @@ export const Canvas = ({ boardId }: CanvasProps) => {
      INSERT LAYER
      ======================= */
   const insertLayer = useMutation(
-    ({ storage, setMyPresence }, layerType: LayerType, position: Point) => {
+    (
+      { storage, setMyPresence },
+      layerType: LayerType,
+      position: Point,
+      connectorStyle?: "straight" | "elbow" | "curved"
+    ) => {
       const liveLayers = storage.get("layers");
       if (liveLayers.size >= MAX_LAYERS) {
         return;
@@ -287,7 +292,19 @@ export const Canvas = ({ boardId }: CanvasProps) => {
         arrow: layerType === LayerType.ArrowConnector,
       };
 
-      if (layerType === LayerType.Frame) {
+      if (layerType === LayerType.Connector || layerType === LayerType.ArrowConnector) {
+        newLayerData = {
+          type: layerType,
+          x: position.x,
+          y: position.y,
+          width: 150,
+          height: 100,
+          fill: lastUsedColor,
+          arrow: layerType === LayerType.ArrowConnector,
+          style: connectorStyle || "straight",
+          strokeWidth: 3,
+        };
+      } else if (layerType === LayerType.Frame) {
         const existingCount = Array.from(liveLayers.values()).filter(
           (l) => l.get("type") === LayerType.Frame
         ).length;
@@ -690,7 +707,11 @@ export const Canvas = ({ boardId }: CanvasProps) => {
       } else if (canvasState.mode === CanvasMode.Pencil) {
         insertPath();
       } else if (canvasState.mode === CanvasMode.Inserting) {
-        insertLayer(canvasState.layerType, point);
+        insertLayer(
+          canvasState.layerType,
+          point,
+          "connectorStyle" in canvasState ? canvasState.connectorStyle : undefined
+        );
       } else {
         setCanvasState({
           mode: CanvasMode.None,
@@ -1032,6 +1053,7 @@ export const Canvas = ({ boardId }: CanvasProps) => {
             setCanvasState({
               mode: CanvasMode.Inserting,
               layerType: LayerType.ArrowConnector,
+              connectorStyle: "straight",
             });
             break;
           }
@@ -1223,7 +1245,7 @@ export const Canvas = ({ boardId }: CanvasProps) => {
       </svg>
 
       {/* Zoom Bar & Fit to Screen */}
-      <div className="absolute bottom-16 right-4 z-20 flex items-center gap-1 rounded-xl border border-neutral-200/80 bg-white/95 p-1 shadow-md backdrop-blur-md md:bottom-4">
+      <div className="absolute bottom-16 right-4 z-30 flex items-center gap-1 rounded-xl border border-neutral-200/80 bg-white/95 p-1 shadow-md backdrop-blur-md md:bottom-5 md:right-5">
         <Hint label="Zoom out" side="top">
           <button
             className="h-8 w-8 rounded-lg text-lg font-medium hover:bg-neutral-100 flex items-center justify-center transition-colors text-neutral-700"

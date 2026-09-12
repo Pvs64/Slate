@@ -254,6 +254,7 @@ export const Toolbar = ({
                   setCanvasState({
                     mode: CanvasMode.Inserting,
                     layerType: LayerType.ArrowConnector,
+                    connectorStyle: "straight",
                   })
                 }
               />
@@ -268,6 +269,7 @@ export const Toolbar = ({
                 setCanvasState({
                   mode: CanvasMode.Inserting,
                   layerType: LayerType.ArrowConnector,
+                  connectorStyle: "straight",
                 })
               }
               className="flex items-center gap-2 text-xs font-medium cursor-pointer"
@@ -281,6 +283,7 @@ export const Toolbar = ({
                 setCanvasState({
                   mode: CanvasMode.Inserting,
                   layerType: LayerType.Connector,
+                  connectorStyle: "straight",
                 })
               }
               className="flex items-center gap-2 text-xs font-medium cursor-pointer"
@@ -294,6 +297,7 @@ export const Toolbar = ({
                 setCanvasState({
                   mode: CanvasMode.Inserting,
                   layerType: LayerType.ArrowConnector,
+                  connectorStyle: "elbow",
                 })
               }
               className="flex items-center gap-2 text-xs font-medium cursor-pointer"
@@ -306,6 +310,7 @@ export const Toolbar = ({
                 setCanvasState({
                   mode: CanvasMode.Inserting,
                   layerType: LayerType.ArrowConnector,
+                  connectorStyle: "curved",
                 })
               }
               className="flex items-center gap-2 text-xs font-medium cursor-pointer"

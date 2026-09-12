@@ -159,6 +159,8 @@ export type ConnectorLayer = BaseLayerProps & {
   style?: "straight" | "elbow" | "curved";
   startLayerId?: string;
   endLayerId?: string;
+  startPoint?: Point;
+  endPoint?: Point;
 };
 
 export type SystemShapeLayer = BaseLayerProps & {
@@ -216,6 +218,7 @@ export type PdfLayer = BaseLayerProps & {
   fill: Color;
   src: string;
   name: string;
+  mediaType?: "pdf" | "image";
 };
 
 export type Point = {
@@ -253,6 +256,7 @@ export type CanvasState =
   | {
       mode: CanvasMode.Inserting;
       layerType: LayerType;
+      connectorStyle?: "straight" | "elbow" | "curved";
     }
   | {
       mode: CanvasMode.Pencil;

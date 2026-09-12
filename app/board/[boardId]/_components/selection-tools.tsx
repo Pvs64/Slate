@@ -769,14 +769,17 @@ export const SelectionTools = memo(
 
               <Hint label="End Arrow">
                 <Button
-                  onClick={() =>
-                    updateConnectorProperty(
-                      "arrowEnd",
-                      !("arrowEnd" in selectedLayer && selectedLayer.arrowEnd)
-                    )
-                  }
+                  onClick={() => {
+                    const currentEnd =
+                      "arrowEnd" in selectedLayer && selectedLayer.arrowEnd !== undefined
+                        ? selectedLayer.arrowEnd
+                        : selectedLayer.arrow !== false;
+                    updateConnectorProperty("arrowEnd", !currentEnd);
+                  }}
                   variant={
-                    "arrowEnd" in selectedLayer && selectedLayer.arrowEnd
+                    ("arrowEnd" in selectedLayer && selectedLayer.arrowEnd !== undefined
+                      ? selectedLayer.arrowEnd
+                      : selectedLayer.arrow !== false)
                       ? "boardActive"
                       : "board"
                   }

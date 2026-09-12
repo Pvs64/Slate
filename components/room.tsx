@@ -36,6 +36,47 @@ export const Room = ({ roomId, children, fallback, token, role }: RoomProps) => 
     }
   }, [token, roomId, claimLink]);
 
+  // Automatically remove any "Powered by Liveblocks" watermark badge injected into the DOM
+  useEffect(() => {
+    const purgeLiveblocksBadge = () => {
+      const candidates = document.querySelectorAll(
+        'a[href*="liveblocks.io"], [class*="liveblocks-badge"], [class*="lb-badge"], [id*="liveblocks-badge"]'
+      );
+      candidates.forEach((el) => {
+        const container =
+          el.closest('div[style*="position: fixed"]') ||
+          el.closest('div[style*="position: absolute"]') ||
+          el.parentElement ||
+          el;
+        (container as HTMLElement).style.setProperty("display", "none", "important");
+        (container as HTMLElement).remove?.();
+      });
+
+      const allElements = document.querySelectorAll("div, a, span, p");
+      allElements.forEach((el) => {
+        if (
+          el.childNodes.length <= 2 &&
+          el.textContent &&
+          /powered by liveblocks/i.test(el.textContent.trim())
+        ) {
+          const container =
+            el.closest('div[style*="position: fixed"]') ||
+            el.closest('div[style*="position: absolute"]') ||
+            el.parentElement ||
+            el;
+          (container as HTMLElement).style.setProperty("display", "none", "important");
+          (container as HTMLElement).remove?.();
+        }
+      });
+    };
+
+    purgeLiveblocksBadge();
+    const observer = new MutationObserver(purgeLiveblocksBadge);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, []);
+
   const resolveUsers = useCallback(async ({ userIds }: { userIds: string[] }) => {
     if (!userIds || userIds.length === 0) return [];
     try {

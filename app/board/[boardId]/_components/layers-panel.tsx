@@ -18,6 +18,7 @@ import {
   LayoutTemplate,
   FileText,
   Boxes,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useStorage, useMutation, useSelf } from "@/liveblocks.config";
 import { LayerType, Layer } from "@/types/canvas";
@@ -81,8 +82,8 @@ export const LayersPanel = ({ isOpen, onClose, onSelectLayer }: LayersPanelProps
 
   if (!isOpen) return null;
 
-  const getLayerIcon = (type: LayerType) => {
-    switch (type) {
+  const getLayerIcon = (layer: Layer) => {
+    switch (layer.type) {
       case LayerType.Text:
         return <Type className="h-3.5 w-3.5 text-blue-500" />;
       case LayerType.Note:
@@ -100,6 +101,9 @@ export const LayersPanel = ({ isOpen, onClose, onSelectLayer }: LayersPanelProps
       case LayerType.Frame:
         return <LayoutTemplate className="h-3.5 w-3.5 text-purple-600" />;
       case LayerType.Pdf:
+        if ("mediaType" in layer && layer.mediaType === "image") {
+          return <ImageIcon className="h-3.5 w-3.5 text-sky-500" />;
+        }
         return <FileText className="h-3.5 w-3.5 text-red-500" />;
       case LayerType.SystemShape:
         return <Boxes className="h-3.5 w-3.5 text-sky-500" />;
@@ -154,7 +158,7 @@ export const LayersPanel = ({ isOpen, onClose, onSelectLayer }: LayersPanelProps
                 }`}
               >
                 <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                  {getLayerIcon(layer.type)}
+                  {getLayerIcon(layer)}
                   <span className="truncate">{getLayerLabel(layer)}</span>
                 </div>
 

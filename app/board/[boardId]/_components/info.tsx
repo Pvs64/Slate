@@ -189,7 +189,11 @@ export const Info: InfoComponent = ({
       )}
 
       {/* Share Panel */}
-      <SharePanel boardId={data._id} ownerName={data.authorName} />
+      <SharePanel
+        boardId={data._id}
+        ownerName={data.authorName}
+        boardTitle={data.title}
+      />
 
       {/* Board Export */}
       <BoardExport boardId={data._id} />

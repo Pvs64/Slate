@@ -14,6 +14,7 @@ import {
   Eye,
   MessageSquare,
   Edit3,
+  Loader2,
 } from "lucide-react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -34,6 +35,7 @@ type LinkRole = "viewer" | "commenter" | "editor";
 interface SharePanelProps {
   boardId: string;
   ownerName: string;
+  boardTitle?: string;
 }
 
 const ROLE_CONFIG: Record<
@@ -60,13 +62,19 @@ const ROLE_CONFIG: Record<
   },
 };
 
-export const SharePanel = ({ boardId, ownerName }: SharePanelProps) => {
+export const SharePanel = ({
+  boardId,
+  ownerName,
+  boardTitle = "Whiteboard",
+}: SharePanelProps) => {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<ShareRole>("editor");
   const [selectedLinkRole, setSelectedLinkRole] = useState<LinkRole>("viewer");
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [emailingMember, setEmailingMember] = useState<string | null>(null);
 
   const shares = useQuery(api.shares.list, open ? { boardId: boardId as never } : "skip");
   const shareLinks = useQuery(
@@ -107,24 +115,83 @@ export const SharePanel = ({ boardId, ownerName }: SharePanelProps) => {
     }
   };
 
-  const submitInvite = (event: FormEvent) => {
+  const sendEmailInvitation = async (targetEmail: string, role: ShareRole) => {
+    const linkRole: LinkRole = role === "admin" ? "editor" : (role as LinkRole);
+    const link = await getOrCreateLink({
+      boardId: boardId as never,
+      role: linkRole,
+    });
+
+    const token = link?.token || "";
+    const inviteLink = getFullUrl(token, linkRole);
+
+    const res = await fetch("/api/send-invite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: targetEmail,
+        boardId,
+        boardTitle,
+        role,
+        inviteLink,
+        inviterName: ownerName,
+      }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || "Email dispatch failed");
+    }
+
+    const data = await res.json();
+    if (data.delivered) {
+      toast.success(`Invitation email sent directly to ${targetEmail}!`);
+    } else if (data.mailtoUrl) {
+      window.open(data.mailtoUrl, "_blank");
+      toast.info(
+        `Invite saved! Opening your email client to send link to ${targetEmail}...`
+      );
+    } else {
+      toast.success(`Invite link generated for ${targetEmail}`);
+    }
+  };
+
+  const submitInvite = async (event: FormEvent) => {
     event.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) return;
 
-    saveShare({
-      boardId: boardId as never,
-      memberId: cleanEmail,
-      memberName: cleanEmail.split("@")[0],
-      role: inviteRole,
-    })
-      .then(() => {
-        toast.success(`Invited ${cleanEmail} as ${inviteRole}`);
-        setEmail("");
-      })
-      .catch(() => {
-        toast.error("Failed to update board access");
+    setSendingInvite(true);
+    try {
+      await saveShare({
+        boardId: boardId as never,
+        memberId: cleanEmail,
+        memberName: cleanEmail.split("@")[0],
+        role: inviteRole,
       });
+
+      await sendEmailInvitation(cleanEmail, inviteRole);
+      setEmail("");
+    } catch (err) {
+      console.error("Invite error:", err);
+      toast.error("Failed to send invite or update board access");
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
+  const handleResendEmail = async (memberEmail: string, role: ShareRole) => {
+    setEmailingMember(memberEmail);
+    try {
+      await sendEmailInvitation(memberEmail, role);
+    } catch (err) {
+      console.error("Resend error:", err);
+      toast.error("Failed to send invitation email");
+    } finally {
+      setEmailingMember(null);
+    }
   };
 
   const handleRemove = (memberId: string, memberName: string) => {
@@ -314,7 +381,12 @@ export const SharePanel = ({ boardId, ownerName }: SharePanelProps) => {
 
         {/* Invite by Email */}
         <form onSubmit={submitInvite} className="mb-4 space-y-2">
-          <p className="text-[11px] font-semibold text-neutral-700">Invite via Email</p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-neutral-700">Invite via Email</p>
+            <span className="text-[10px] text-sky-600 font-medium flex items-center gap-1">
+              <Mail className="h-3 w-3" /> Sends direct link
+            </span>
+          </div>
           <div className="relative">
             <Mail className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
             <input
@@ -343,10 +415,17 @@ export const SharePanel = ({ boardId, ownerName }: SharePanelProps) => {
             <Button
               type="submit"
               size="sm"
-              className="h-8 px-3 text-xs bg-sky-600 hover:bg-sky-700 text-white cursor-pointer"
-              disabled={saving || !email.trim()}
+              className="h-8 px-3 text-xs bg-sky-600 hover:bg-sky-700 text-white cursor-pointer min-w-[80px]"
+              disabled={saving || sendingInvite || !email.trim()}
             >
-              {saving ? "Inviting..." : "Invite"}
+              {sendingInvite ? (
+                <span className="flex items-center gap-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Mailing...
+                </span>
+              ) : (
+                "Send Invite"
+              )}
             </Button>
           </div>
         </form>
@@ -381,7 +460,25 @@ export const SharePanel = ({ boardId, ownerName }: SharePanelProps) => {
                 <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 capitalize">
                   {share.role === "viewer" ? "Can view" : share.role}
                 </span>
+                {share.memberId.includes("@") && (
+                  <Hint label={`Email invite link to ${share.memberId}`} side="top">
+                    <button
+                      type="button"
+                      onClick={() => handleResendEmail(share.memberId, share.role as ShareRole)}
+                      disabled={emailingMember === share.memberId}
+                      className="p-1 text-neutral-400 hover:text-sky-600 cursor-pointer disabled:opacity-50"
+                      aria-label={`Email link to ${share.memberId}`}
+                    >
+                      {emailingMember === share.memberId ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-600" />
+                      ) : (
+                        <Mail className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </Hint>
+                )}
                 <button
+                  type="button"
                   onClick={() => handleRemove(share.memberId, share.memberName)}
                   className="p-1 text-neutral-400 hover:text-rose-600 cursor-pointer"
                   aria-label={`Remove ${share.memberName}`}

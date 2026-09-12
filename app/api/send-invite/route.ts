@@ -94,7 +94,10 @@ export async function POST(request: Request) {
 </html>
 `;
 
-    // 1. Try sending via Resend if RESEND_API_KEY is configured
+    const inviterEmail =
+      user?.emailAddresses?.[0]?.emailAddress || "";
+
+    let resendErrorDetail: string | null = null;
     const resendApiKey = process.env.RESEND_API_KEY;
     if (resendApiKey) {
       try {
@@ -111,6 +114,7 @@ export async function POST(request: Request) {
             to: [email],
             subject,
             html: htmlContent,
+            reply_to: inviterEmail || undefined,
           }),
         });
 
@@ -122,17 +126,24 @@ export async function POST(request: Request) {
             provider: "resend",
             id: resendData.id,
             inviteLink,
+            inviterEmail,
           });
         } else {
           const errData = await resendRes.text();
-          console.error("Resend delivery failed:", errData);
+          console.warn("Resend delivery notice:", errData);
+          try {
+            const parsed = JSON.parse(errData);
+            resendErrorDetail = parsed.message || errData;
+          } catch {
+            resendErrorDetail = errData;
+          }
         }
       } catch (err) {
         console.error("Error connecting to Resend:", err);
       }
     }
 
-    // 2. Fallback: Provide mailto URL so user's email client opens instantly with link
+    // 2. Direct webmail & mailto URLs to send directly from the user's signed-in account
     const mailtoSubject = encodeURIComponent(
       `${senderName} invited you to "${title}" on Slate`
     );
@@ -140,15 +151,21 @@ export async function POST(request: Request) {
       `Hi,\n\n${senderName} has invited you to collaborate on "${title}" on Slate.\n\nYou can access the board directly using this link:\n${inviteLink}\n\nYour assigned access: ${roleName}\n\nSee you on the board!`
     );
     const mailtoUrl = `mailto:${encodeURIComponent(email)}?subject=${mailtoSubject}&body=${mailtoBody}`;
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${mailtoSubject}&body=${mailtoBody}`;
+    const outlookUrl = `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(email)}&subject=${mailtoSubject}&body=${mailtoBody}`;
 
     return Response.json({
       success: true,
       delivered: false,
       provider: "none",
+      resendError: resendErrorDetail,
       mailtoUrl,
+      gmailUrl,
+      outlookUrl,
+      inviterEmail,
       inviteLink,
       message:
-        "Invite created! For automated background sending, configure RESEND_API_KEY in .env.local",
+        "Invite link created! Ready to send directly from your signed-in account.",
     });
   } catch (error) {
     console.error("Error in /api/send-invite:", error);

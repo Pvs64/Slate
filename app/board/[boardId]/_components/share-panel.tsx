@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import {
   Share2,
   Trash2,
@@ -62,11 +63,24 @@ const ROLE_CONFIG: Record<
   },
 };
 
+interface LastInviteResult {
+  email: string;
+  role: string;
+  inviteLink: string;
+  gmailUrl: string;
+  outlookUrl: string;
+  mailtoUrl: string;
+}
+
 export const SharePanel = ({
   boardId,
   ownerName,
   boardTitle = "Whiteboard",
 }: SharePanelProps) => {
+  const { user } = useUser();
+  const senderEmail = user?.primaryEmailAddress?.emailAddress || "";
+  const senderName = user?.fullName || user?.firstName || ownerName || "A teammate";
+
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<ShareRole>("editor");
@@ -75,6 +89,7 @@ export const SharePanel = ({
   const [generatingLink, setGeneratingLink] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
   const [emailingMember, setEmailingMember] = useState<string | null>(null);
+  const [lastInvite, setLastInvite] = useState<LastInviteResult | null>(null);
 
   const shares = useQuery(api.shares.list, open ? { boardId: boardId as never } : "skip");
   const shareLinks = useQuery(
@@ -115,8 +130,16 @@ export const SharePanel = ({
     }
   };
 
-  const sendEmailInvitation = async (targetEmail: string, role: ShareRole) => {
+  const executeInviteFlow = async (
+    targetEmail: string,
+    role: ShareRole,
+    client: "auto" | "gmail" | "mailto" | "outlook" = "auto",
+    existingPopup?: Window | null
+  ) => {
     const linkRole: LinkRole = role === "admin" ? "editor" : (role as LinkRole);
+    const roleLabel = ROLE_CONFIG[linkRole]?.label || role;
+
+    // 1. Get or generate access token
     const link = await getOrCreateLink({
       boardId: boardId as never,
       role: linkRole,
@@ -125,36 +148,97 @@ export const SharePanel = ({
     const token = link?.token || "";
     const inviteLink = getFullUrl(token, linkRole);
 
-    const res = await fetch("/api/send-invite", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email: targetEmail,
-        boardId,
-        boardTitle,
-        role,
-        inviteLink,
-        inviterName: ownerName,
-      }),
+    // 2. Build pre-filled webmail and mailto URLs directly
+    const mailSubject = `${senderName} invited you to collaborate on "${boardTitle}" on Slate`;
+    const mailBody = `Hi,\n\n${senderName} has invited you to collaborate on "${boardTitle}" on Slate.\n\nClick this direct link to open the board:\n${inviteLink}\n\nYour assigned access role: ${roleLabel}\n\nSee you on the board!`;
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+      targetEmail
+    )}&su=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
+    const outlookUrl = `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(
+      targetEmail
+    )}&subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
+    const mailtoUrl = `mailto:${encodeURIComponent(
+      targetEmail
+    )}?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
+
+    // Store in state so the card appears in the modal for 1-click fallback
+    setLastInvite({
+      email: targetEmail,
+      role: roleLabel,
+      inviteLink,
+      gmailUrl,
+      outlookUrl,
+      mailtoUrl,
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => null);
-      throw new Error(errJson?.error || "Email dispatch failed");
+    // 3. Attempt server-side background delivery (via Resend)
+    let deliveredViaResend = false;
+    try {
+      const res = await fetch("/api/send-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: targetEmail,
+          boardId,
+          boardTitle,
+          role,
+          inviteLink,
+          inviterName: senderName,
+          inviterEmail: senderEmail,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.delivered) {
+          deliveredViaResend = true;
+          if (existingPopup && !existingPopup.closed) existingPopup.close();
+          toast.success(`Invitation email delivered directly to ${targetEmail} via Resend!`);
+          return;
+        } else if (data.resendError) {
+          console.info("Resend status:", data.resendError);
+        }
+      }
+    } catch (e) {
+      console.warn("Background delivery note:", e);
     }
 
-    const data = await res.json();
-    if (data.delivered) {
-      toast.success(`Invitation email sent directly to ${targetEmail}!`);
-    } else if (data.mailtoUrl) {
-      window.open(data.mailtoUrl, "_blank");
-      toast.info(
-        `Invite saved! Opening your email client to send link to ${targetEmail}...`
-      );
+    if (deliveredViaResend) return;
+
+    // 4. Fallback: Open email client directly from user's account
+    const prefersOutlook =
+      client === "outlook" ||
+      (client === "auto" &&
+        (senderEmail.toLowerCase().includes("outlook") ||
+          senderEmail.toLowerCase().includes("hotmail") ||
+          senderEmail.toLowerCase().includes("live.")));
+
+    const prefersMailto = client === "mailto";
+
+    if (prefersMailto) {
+      if (existingPopup && !existingPopup.closed) existingPopup.close();
+      const a = document.createElement("a");
+      a.href = mailtoUrl;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.info(`Opening your mail client to send link to ${targetEmail}...`);
+    } else if (prefersOutlook) {
+      if (existingPopup && !existingPopup.closed) {
+        existingPopup.location.href = outlookUrl;
+      } else {
+        window.open(outlookUrl, "_blank");
+      }
+      toast.success(`Opening Outlook compose with your invite link!`);
     } else {
-      toast.success(`Invite link generated for ${targetEmail}`);
+      // Default: Gmail Web compose
+      if (existingPopup && !existingPopup.closed) {
+        existingPopup.location.href = gmailUrl;
+      } else {
+        window.open(gmailUrl, "_blank");
+      }
+      toast.success(`Opening Gmail compose from ${senderEmail || "your account"}!`);
     }
   };
 
@@ -162,6 +246,14 @@ export const SharePanel = ({
     event.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) return;
+
+    // Open popup synchronously on user gesture so popup blockers NEVER block it!
+    let popupWindow: Window | null = null;
+    try {
+      popupWindow = window.open("about:blank", "_blank");
+    } catch {
+      // Popup blocked or not supported
+    }
 
     setSendingInvite(true);
     try {
@@ -172,23 +264,68 @@ export const SharePanel = ({
         role: inviteRole,
       });
 
-      await sendEmailInvitation(cleanEmail, inviteRole);
+      await executeInviteFlow(cleanEmail, inviteRole, "auto", popupWindow);
       setEmail("");
     } catch (err) {
+      if (popupWindow && !popupWindow.closed) popupWindow.close();
       console.error("Invite error:", err);
-      toast.error("Failed to send invite or update board access");
+      toast.error("Failed to update board access");
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
+  const submitWithClient = async (client: "gmail" | "mailto" | "outlook") => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      toast.error("Please enter a collaborator email first");
+      return;
+    }
+
+    let popupWindow: Window | null = null;
+    if (client !== "mailto") {
+      try {
+        popupWindow = window.open("about:blank", "_blank");
+      } catch {
+        // Fallback
+      }
+    }
+
+    setSendingInvite(true);
+    try {
+      await saveShare({
+        boardId: boardId as never,
+        memberId: cleanEmail,
+        memberName: cleanEmail.split("@")[0],
+        role: inviteRole,
+      });
+
+      await executeInviteFlow(cleanEmail, inviteRole, client, popupWindow);
+      setEmail("");
+    } catch (err) {
+      if (popupWindow && !popupWindow.closed) popupWindow.close();
+      console.error("Invite error:", err);
+      toast.error("Failed to send invite");
     } finally {
       setSendingInvite(false);
     }
   };
 
   const handleResendEmail = async (memberEmail: string, role: ShareRole) => {
+    let popupWindow: Window | null = null;
+    try {
+      popupWindow = window.open("about:blank", "_blank");
+    } catch {
+      // Fallback
+    }
+
     setEmailingMember(memberEmail);
     try {
-      await sendEmailInvitation(memberEmail, role);
+      await executeInviteFlow(memberEmail, role, "auto", popupWindow);
     } catch (err) {
+      if (popupWindow && !popupWindow.closed) popupWindow.close();
       console.error("Resend error:", err);
-      toast.error("Failed to send invitation email");
+      toast.error("Failed to prepare invitation email");
     } finally {
       setEmailingMember(null);
     }
@@ -380,13 +517,24 @@ export const SharePanel = ({
         </div>
 
         {/* Invite by Email */}
-        <form onSubmit={submitInvite} className="mb-4 space-y-2">
+        <form onSubmit={submitInvite} className="mb-4 space-y-2.5">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-semibold text-neutral-700">Invite via Email</p>
             <span className="text-[10px] text-sky-600 font-medium flex items-center gap-1">
-              <Mail className="h-3 w-3" /> Sends direct link
+              <Mail className="h-3 w-3" /> Sends from your account
             </span>
           </div>
+
+          {senderEmail && (
+            <div className="flex items-center justify-between rounded-md bg-sky-50/70 border border-sky-200/60 px-2.5 py-1 text-[11px] text-sky-900">
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+                <span className="text-neutral-500 font-medium">Mailing from:</span>
+                <span className="font-semibold text-neutral-900 truncate">{senderEmail}</span>
+              </span>
+            </div>
+          )}
+
           <div className="relative">
             <Mail className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
             <input
@@ -428,7 +576,88 @@ export const SharePanel = ({
               )}
             </Button>
           </div>
+
+          {/* 1-Click Direct Mail Client Options */}
+          <div className="flex items-center gap-1.5 pt-0.5 text-[10px] text-neutral-500">
+            <span>Send directly via:</span>
+            <button
+              type="button"
+              onClick={() => submitWithClient("gmail")}
+              disabled={sendingInvite || !email.trim()}
+              className="rounded border border-neutral-200 bg-white px-2 py-0.5 font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-40 cursor-pointer"
+            >
+              Gmail Web
+            </button>
+            <button
+              type="button"
+              onClick={() => submitWithClient("mailto")}
+              disabled={sendingInvite || !email.trim()}
+              className="rounded border border-neutral-200 bg-white px-2 py-0.5 font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-40 cursor-pointer"
+            >
+              Mail App
+            </button>
+            <button
+              type="button"
+              onClick={() => submitWithClient("outlook")}
+              disabled={sendingInvite || !email.trim()}
+              className="rounded border border-neutral-200 bg-white px-2 py-0.5 font-medium text-neutral-700 hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-40 cursor-pointer"
+            >
+              Outlook Web
+            </button>
+          </div>
         </form>
+
+        {/* Last Sent / Ready Invite Quick Actions Card */}
+        {lastInvite && (
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5 text-xs space-y-2 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-emerald-900 flex items-center gap-1.5 text-[11px]">
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                Invite ready for {lastInvite.email}
+              </span>
+              <span className="rounded bg-emerald-200/80 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 uppercase">
+                {lastInvite.role}
+              </span>
+            </div>
+            <p className="text-[10px] text-emerald-800">
+              Click below to send from your account or copy link:
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              <a
+                href={lastInvite.gmailUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-emerald-300 font-semibold text-neutral-800 hover:bg-neutral-50 shadow-2xs text-[10px]"
+              >
+                <Mail className="h-3 w-3 text-rose-500" /> Open in Gmail
+              </a>
+              <a
+                href={lastInvite.outlookUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-emerald-300 font-semibold text-neutral-800 hover:bg-neutral-50 shadow-2xs text-[10px]"
+              >
+                <Mail className="h-3 w-3 text-sky-600" /> Open in Outlook
+              </a>
+              <a
+                href={lastInvite.mailtoUrl}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-emerald-300 font-semibold text-neutral-800 hover:bg-neutral-50 shadow-2xs text-[10px]"
+              >
+                <Mail className="h-3 w-3 text-neutral-600" /> Mail App
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(lastInvite.inviteLink);
+                  toast.success("Invite link copied to clipboard!");
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-emerald-300 font-semibold text-neutral-800 hover:bg-neutral-50 shadow-2xs text-[10px] cursor-pointer"
+              >
+                <Copy className="h-3 w-3 text-neutral-600" /> Copy Link
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Members List */}
         <div className="space-y-2 border-t border-neutral-100 pt-3">
